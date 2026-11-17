@@ -20,6 +20,7 @@ class KvmVm;
 using VmExitHandler = std::function<VmResult(struct kvm_run*)>;
 
 struct VcpuConfig {
+    bool reset_real_mode{false};
     uint64_t rip{0};
     uint64_t rsp{0};
     uint64_t cr0{0x60000010};

@@ -16,7 +16,7 @@ lib.archvirt_last_error.argtypes = [c.c_void_p]
 lib.archvirt_last_error.restype = c.c_char_p
 for name in ("archvirt_start", "archvirt_wait", "archvirt_stop", "archvirt_destroy"):
     getattr(lib, name).argtypes = [c.c_void_p]
-for machine in (b"x86_64", b"aarch64"):
+for machine in (b"x86_64", b"aarch64", b"riscv64"):
     vm = lib.archvirt_create()
     assert vm
     output = bytearray()
@@ -40,4 +40,4 @@ for machine in (b"x86_64", b"aarch64"):
         assert b"Domix shutdown" in output, output
     finally:
         lib.archvirt_destroy(vm)
-print("C API boots both machines and reports execution results")
+print("C API boots all three machines and reports execution results")

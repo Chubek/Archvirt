@@ -56,6 +56,17 @@ VmResult VcpuThread::initialize() {
                 "KVM_GET_SREGS failed: " + std::string(strerror(errno))};
     }
 
+    if (config_.reset_real_mode) {
+        // Architectural reset fetch at FFFFFFF0, followed by the ROM's far jump
+        // to the low F000 segment. Do not install direct-boot page tables.
+        sregs.cr0 = 0x60000010; sregs.cr3 = 0; sregs.cr4 = 0; sregs.efer = 0;
+        sregs.cs = {}; sregs.cs.selector = 0xf000; sregs.cs.base = 0xffff0000;
+        sregs.cs.limit = 0xffff; sregs.cs.type = 11; sregs.cs.present = 1; sregs.cs.s = 1;
+        kvm_segment data{}; data.limit = 0xffff; data.type = 3; data.present = 1; data.s = 1;
+        sregs.ds = sregs.es = sregs.fs = sregs.gs = sregs.ss = data;
+        sregs.idt.base = 0; sregs.idt.limit = 0x3ff;
+        sregs.gdt.base = 0; sregs.gdt.limit = 0xffff;
+    } else {
     sregs.cr0 = config_.cr0;
     sregs.cr3 = config_.cr3;
     sregs.cr4 = config_.cr4;
@@ -86,6 +97,7 @@ VmResult VcpuThread::initialize() {
     // first instruction executes.
     sregs.ds.l = sregs.es.l = sregs.fs.l = sregs.gs.l = sregs.ss.l = 0;
     sregs.ds.g = sregs.es.g = sregs.fs.g = sregs.gs.g = sregs.ss.g = 1;
+    }
 
     if (ioctl(vcpu_fd_, KVM_SET_SREGS, &sregs) < 0) {
         return {VmErrorCode::VCPU_CREATE_FAILED,
@@ -95,7 +107,7 @@ VmResult VcpuThread::initialize() {
     struct kvm_regs regs{};
     memset(&regs, 0, sizeof(regs));
     regs.rflags = 0x2;
-    regs.rip = config_.rip;
+    regs.rip = config_.reset_real_mode ? 0xfff0 : config_.rip;
     regs.rsp = config_.rsp;
     regs.rdi = config_.boot_argument;
 

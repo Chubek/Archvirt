@@ -12,6 +12,7 @@ struct BootOptions {
     std::string archml_path;
     std::string backend{"auto"};
     std::string kernel_path, image_path, firmware_path, cmdline;
+    std::string boot_mode{"direct"}, disk_path;
     std::uint64_t memory_mb{64};
     std::uint64_t instruction_limit{0};
     bool bundled_domix{true}, domios{true};

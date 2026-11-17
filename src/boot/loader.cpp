@@ -112,6 +112,8 @@ VmResult BootLoader::load_elf(std::span<const uint8_t> data, uint8_t* guest_mem,
         le(16, 2) != 2 || le(20, 4) != 1 || le(52, 2) != 64)
         return fail("Expected a little-endian ELF64 executable");
     if (le(18, 2) != machine) return fail("ELF architecture does not match selected machine");
+    if (machine == 243 && le(48, 4) != 0)
+        return fail("RISC-V requires uncompressed RV64 soft-float LP64 ELF flags");
     const auto entry = le(24, 8), phoff = le(32, 8), phsize = le(54, 2), phnum = le(56, 2);
     if (phsize != 56 || !phnum || phoff > data.size() || phnum > (data.size() - phoff) / phsize)
         return fail("Invalid ELF program header table");
@@ -132,11 +134,13 @@ VmResult BootLoader::load_elf(std::span<const uint8_t> data, uint8_t* guest_mem,
         for (const auto& prior : segments)
             if (s.memsz && prior.memsz && s.address < prior.address + prior.memsz &&
                 prior.address < s.address + s.memsz) return fail("ELF load segments overlap");
-        if ((le(p + 4, 4) & 1) && entry >= s.address && entry - s.address < s.filesz)
+        if ((le(p + 4, 4) & 1) && entry >= s.address && entry - s.address < s.filesz &&
+            (machine != 243 || s.filesz - (entry - s.address) >= 4))
             executable_entry = true;
         segments.push_back(s);
     }
-    if (!executable_entry || (machine == 183 && (entry & 3))) return fail("ELF entry is not executable or aligned");
+    if (!executable_entry || ((machine == 183 || machine == 243) && (entry & 3)))
+        return fail("ELF entry is not executable or aligned");
     // Validate every segment before touching guest RAM, including BSS-only ones.
     for (const auto& s : segments) {
         memcpy(guest_mem + s.address, data.data() + s.offset, s.filesz);

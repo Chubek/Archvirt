@@ -47,7 +47,7 @@ struct Terminal {
 };
 void usage(const char* name) {
     std::cout << "Usage: " << name << " [options]\n"
-        "  --machine x86_64|aarch64   Select a DomIOS PC machine\n"
+        "  --machine x86_64|aarch64|riscv64   Select a DomIOS PC machine\n"
         "  --archml PATH             Use a validated ArchML machine profile\n"
         "  --list-machines           List supported machines\n"
         "  --backend auto|software|kvm (default: auto)\n"
@@ -58,7 +58,9 @@ void usage(const char* name) {
         "  -k, --kernel PATH         Identity-mapped ELF64 guest kernel\n"
         "  -i, --initrd PATH         Guest filesystem image\n"
         "  -o, --os PATH             Domix packed system image\n"
-        "  -b, --bios PATH           DomIOS firmware image\n"
+        "  -b, --bios PATH           Firmware image (DomIOS or B1 ROM by boot mode)\n"
+        "  --boot-mode direct|bios   Direct ELF or legacy PC ROM boot\n"
+        "  --disk PATH              BIOS raw ATA disk (private, volatile writes)\n"
         "  -c, --cmdline TEXT        Guest boot command line (up to 2048 bytes)\n"
         "  --[no-]domix              Enable/disable bundled Domix\n"
         "  --[no-]domios             Enable/disable DomIOS firmware\n"
@@ -123,6 +125,7 @@ int main(int argc, char** argv) {
             {"domios", no_argument, nullptr, 1008}, {"no-domios", no_argument, nullptr, 1009},
             {"control", required_argument, nullptr, 1010}, {"kernel", required_argument, nullptr, 'k'},
             {"test-server", required_argument, nullptr, 1011},
+            {"boot-mode", required_argument, nullptr, 1012}, {"disk", required_argument, nullptr, 1013},
             {"initrd", required_argument, nullptr, 'i'}, {"os", required_argument, nullptr, 'o'},
             {"bios", required_argument, nullptr, 'b'}, {"memory", required_argument, nullptr, 'm'},
             {"cmdline", required_argument, nullptr, 'c'}, {"virtual", no_argument, nullptr, 'V'},
@@ -136,7 +139,7 @@ int main(int argc, char** argv) {
             case 1003: headless = true; break;
             case 1004: options.instruction_limit = number(optarg); break;
             case 1005:
-                for (auto name : {"x86_64", "aarch64"}) {
+                for (auto name : {"x86_64", "aarch64", "riscv64"}) {
                     const auto profile = machine::Profile::load(name);
                     std::cout << profile.name << "  ArchML=" << profile.isa.name()
                               << "  DomIOS PC  software" << (profile.native_kvm() ? ", native KVM" : "") << '\n';
@@ -148,6 +151,8 @@ int main(int argc, char** argv) {
             case 1009: options.domios = false; break;
             case 1010: control_path = optarg; break;
             case 1011: control_path = optarg; test_server = true; break;
+            case 1012: options.boot_mode = optarg; break;
+            case 1013: options.disk_path = optarg; break;
             case 'k': options.kernel_path = optarg; options.bundled_domix = false; break;
             case 'i': options.image_path = optarg; break;
             case 'o': options.image_path = optarg; options.bundled_domix = true; break;
@@ -195,7 +200,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         display.set_status("DomIOS: preparing machine", 0.1f);
-        if (options.domios && !headless) {
+        if (options.boot_mode == "direct" && options.domios && !headless) {
             domios::SplashFrame splash; std::string error;
             if (domios::Bootstrap{}.render_splash(splash, error)) {
                 display.set_guest_framebuffer(splash.pixels.data(), splash.geometry.width,
@@ -205,7 +210,7 @@ int main(int argc, char** argv) {
             }
         }
         std::cout << "ArchVirt: " << options.machine << " / " << options.backend
-                  << (options.domios ? " / DomIOS handoff\n" : "\n");
+                  << (options.boot_mode == "bios" ? " / PC BIOS\n" : options.domios ? " / DomIOS handoff\n" : "\n");
         display.set_status("Running " + options.machine, 1);
         auto result = session.boot(options);
         if (!result) throw std::runtime_error(result.message);

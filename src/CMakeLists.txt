@@ -5,11 +5,12 @@ set(DOMVIRT_BINDLET_STUBS_DIR "${PROJECT_SOURCE_DIR}/domainlet/bindlets")
 
 file(MAKE_DIRECTORY "${DOMVIRT_GEN_DIR}/bindlet_bridge")
 add_custom_command(OUTPUT "${DOMVIRT_GEN_DIR}/machine_sources.hpp"
-    BYPRODUCTS "${DOMVIRT_GEN_DIR}/machines/x86_64.aml" "${DOMVIRT_GEN_DIR}/machines/aarch64.aml"
+    BYPRODUCTS "${DOMVIRT_GEN_DIR}/machines/x86_64.aml" "${DOMVIRT_GEN_DIR}/machines/aarch64.aml" "${DOMVIRT_GEN_DIR}/machines/riscv64.aml"
     COMMAND ${Python_EXECUTABLE} "${PROJECT_SOURCE_DIR}/tools/archml_bundle.py"
         "${PROJECT_SOURCE_DIR}" "${DOMVIRT_GEN_DIR}/machine_sources.hpp"
     DEPENDS "${PROJECT_SOURCE_DIR}/tools/archml_bundle.py"
         "${PROJECT_SOURCE_DIR}/machines/x86_64.aml" "${PROJECT_SOURCE_DIR}/machines/aarch64.aml"
+        "${PROJECT_SOURCE_DIR}/machines/riscv64.aml" "${ARCHML_DIR}/stdspec/riscv64.aml"
         "${ARCHML_DIR}/stdspec/amd64.aml" "${ARCHML_DIR}/stdspec/arm64.aml"
     VERBATIM)
 
@@ -58,6 +59,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
 endif()
 
 set(VIRTUAL_SOURCES
+    ${DOMVIRT_SRC_DIR}/virtual/riscv64_cpu.cpp
     ${DOMVIRT_SRC_DIR}/virtual/aarch64_cpu.cpp
     ${DOMVIRT_SRC_DIR}/virtual/virtual_cpu.cpp
     ${DOMVIRT_SRC_DIR}/virtual/virtual_backend.cpp
@@ -129,10 +131,13 @@ if(DOMWEAVE_EMBED_DOMVIRT)
             --additional-symbol domix_image
             --additional-input "${PROJECT_BINARY_DIR}/domix/aarch64/domix.img"
             --additional-symbol domix_aarch64_image
+            --additional-input "${PROJECT_BINARY_DIR}/domix/riscv64/domix.img"
+            --additional-symbol domix_riscv64_image
         DEPENDS
             "${PROJECT_BINARY_DIR}/domios/domios.img"
             "${PROJECT_BINARY_DIR}/domix/x86_64/domix.img"
             "${PROJECT_BINARY_DIR}/domix/aarch64/domix.img"
+            "${PROJECT_BINARY_DIR}/domix/riscv64/domix.img"
             "${PROJECT_SOURCE_DIR}/tools/embed_binary.py"
         VERBATIM
     )
@@ -143,6 +148,7 @@ set(DOMVIRT_ALL_SOURCES
     ${DOMVIRT_GEN_DIR}/machine_sources.hpp
     ${DOMVIRT_SRC_DIR}/machine/profile.cpp
     ${DOMVIRT_SRC_DIR}/machine/runtime.cpp
+    ${DOMVIRT_SRC_DIR}/machine/pc_devices.cpp
     ${DOMVIRT_SRC_DIR}/testing/test_session.cpp
     ${HYPERVISOR_SOURCES}
     ${VIRTUAL_SOURCES}
@@ -184,6 +190,7 @@ target_compile_definitions(domvirt_core PRIVATE
     _GNU_SOURCE
     DOMVIRT_VERSION="${PROJECT_VERSION}"
     DOMVIRT_DEFAULT_DOMIOS_IMAGE="${PROJECT_BINARY_DIR}/domios/domios.img"
+    ARCHVIRT_PC_BIOS="${PROJECT_BINARY_DIR}/bios/archvirt-bios.bin"
     DOMVIRT_DEFAULT_DOMIX_KERNEL="${PROJECT_BINARY_DIR}/domix/kernel"
     DOMVIRT_DEFAULT_DOMIX_IMAGE="${PROJECT_BINARY_DIR}/domix/domix.img"
     DOMVIRT_DOMIX_DIR="${PROJECT_BINARY_DIR}/domix"
@@ -192,7 +199,7 @@ target_compile_definitions(domvirt_core PRIVATE
 if(DOMWEAVE_EMBED_DOMVIRT)
     target_compile_definitions(domvirt_core PRIVATE DOMVIRT_EMBED_IMAGES=1)
 endif()
-add_dependencies(domvirt_core domios_image domix-image)
+add_dependencies(domvirt_core domios_image domix-image pc_bios)
 
 domvirt_set_compiler_flags(domvirt_core)
 domvirt_set_release_flags(domvirt_core)

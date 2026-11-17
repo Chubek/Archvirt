@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(archvirt VERSION 0.2.0 LANGUAGES C CXX)
+project(archvirt VERSION 0.3.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -123,6 +123,7 @@ endif()
 
 add_subdirectory(domios)
 add_subdirectory(domix)
+add_subdirectory(bios)
 add_subdirectory(src)
 
 set_target_properties(domvirt_cli domvirt_shell PROPERTIES
@@ -148,7 +149,9 @@ install(FILES include/archvirt.h include/archvirt_boot.h include/domvirt_types.h
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(FILES "${PROJECT_BINARY_DIR}/domios/domios.img"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/archvirt/domios")
-foreach(ARCH IN ITEMS x86_64 aarch64)
+install(FILES "${PROJECT_BINARY_DIR}/bios/archvirt-bios.bin"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/archvirt/bios")
+foreach(ARCH IN ITEMS x86_64 aarch64 riscv64)
     install(FILES "${PROJECT_BINARY_DIR}/domix/${ARCH}/domix.img"
                   "${PROJECT_BINARY_DIR}/domix/${ARCH}/kernel"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/archvirt/domix/${ARCH}")

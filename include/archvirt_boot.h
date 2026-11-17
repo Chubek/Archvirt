@@ -3,7 +3,9 @@
 #include <stdint.h>
 
 /* DomIOS v1: little-endian, flat physical addressing, one bootstrap CPU.
- * Passed in RDI (amd64) or X0 (AArch64). No host pointers appear in this ABI. */
+ * Passed in RDI (amd64), X0 (AArch64), or a0/x10 (RV64). RV64 starts with
+ * sp=0x700000, other GPRs zero, IALIGN=32; it is not the Linux/SBI entry ABI.
+ * No host pointers appear in this ABI. */
 #define ARCHVIRT_BOOT_MAGIC UINT64_C(0x31544f4f42565241)
 struct ArchVirtBootInfo {
     uint64_t magic;

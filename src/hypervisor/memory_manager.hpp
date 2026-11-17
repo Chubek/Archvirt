@@ -29,7 +29,7 @@ public:
     MemoryManager& operator=(MemoryManager&&) noexcept;
 
     VmResult allocate_ram(uint64_t size, uint64_t guest_phys_base = 0,
-                          bool use_hugepages = true);
+                          bool use_hugepages = true, bool read_only = false);
     VmResult register_slot(int vm_fd, const MemorySlot& slot);
     VmResult register_all_slots(int vm_fd);
     VmResult enable_dirty_log(int vm_fd, uint32_t slot_id);

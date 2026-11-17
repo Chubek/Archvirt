@@ -6,7 +6,7 @@
 
 namespace domvirt::machine {
 
-enum class Architecture : std::uint16_t { x86_64 = 62, aarch64 = 183 };
+enum class Architecture : std::uint16_t { x86_64 = 62, aarch64 = 183, riscv64 = 243 };
 
 struct Profile {
     Architecture architecture;

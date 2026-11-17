@@ -1,11 +1,13 @@
 #include "runtime.hpp"
 #include "profile.hpp"
+#include "pc_devices.hpp"
 #include "archvirt_boot.h"
 #include "boot/embedded_images.hpp"
 #include "boot/data_path.hpp"
 #include "boot/loader.hpp"
 #include "virtual/virtual_cpu.hpp"
 #include "virtual/aarch64_cpu.hpp"
+#include "virtual/riscv64_cpu.hpp"
 #include "firmware.hpp"
 #include "dit.hpp"
 #include "lua_runtime.hpp"
@@ -19,6 +21,7 @@
 #include <thread>
 #include <condition_variable>
 #include <algorithm>
+#include <tuple>
 
 #if defined(__x86_64__)
 #include "hypervisor/kvm_driver.hpp"
@@ -87,6 +90,8 @@ struct Runtime::Impl {
 #endif
     std::unique_ptr<virtualization::VirtualCpu> x86;
     std::unique_ptr<virtualization::Aarch64Cpu> arm;
+    std::unique_ptr<virtualization::Riscv64Cpu> riscv;
+    std::unique_ptr<PcDevices> pc;
     Serial serial;
     Console console;
     std::atomic<bool> active{false}, stopping{false};
@@ -114,6 +119,14 @@ struct Runtime::Impl {
             profile.console_columns * profile.console_rows * 2));
     }
     VmResult prepare() {
+        if (options.boot_mode != "direct" && options.boot_mode != "bios")
+            return {VmErrorCode::BOOT_LOAD_FAILED, "boot_mode must be direct or bios"};
+        if (options.boot_mode == "bios" && (profile.architecture != Architecture::x86_64 ||
+            options.backend == "software" || options.instruction_limit || options.disk_path.empty() ||
+            !options.kernel_path.empty() || !options.image_path.empty() || !options.cmdline.empty()))
+            return {VmErrorCode::BOOT_LOAD_FAILED, "BIOS requires x86_64 KVM, a disk, and no direct kernel/image/cmdline or instruction limit"};
+        if (options.boot_mode == "direct" && !options.disk_path.empty())
+            return {VmErrorCode::BOOT_LOAD_FAILED, "disk requires boot_mode=bios"};
         if (options.backend != "auto" && options.backend != "software" && options.backend != "kvm")
             return {VmErrorCode::VIRTUAL_BACKEND_ERROR, "Backend must be auto, software, or kvm"};
         if (options.memory_mb < 40 || options.memory_mb > 1024)
@@ -137,6 +150,7 @@ struct Runtime::Impl {
         }
 #endif
         const std::uint64_t bytes = options.memory_mb * 1024 * 1024;
+        if (options.boot_mode == "bios") return prepare_bios(bytes);
         auto result = memory->allocate_ram(bytes, 0, false);
         if (!result) return result;
         auto* guest = memory->translate(0);
@@ -244,6 +258,8 @@ struct Runtime::Impl {
 #endif
         if (profile.architecture == Architecture::aarch64) {
             arm = std::make_unique<virtualization::Aarch64Cpu>(*memory, profile, entry, profile.boot_info, serial);
+        } else if (profile.architecture == Architecture::riscv64) {
+            riscv = std::make_unique<virtualization::Riscv64Cpu>(*memory, profile, entry, profile.boot_info, serial);
         } else {
             virtualization::VirtualCpuConfig cfg{};
             cfg.rip = entry; cfg.rsp = profile.stack_top; cfg.boot_argument = profile.boot_info;
@@ -255,14 +271,64 @@ struct Runtime::Impl {
         }
         return {};
     }
+    VmResult prepare_bios(std::uint64_t bytes) {
+#if defined(__x86_64__)
+        if (backend_name != "kvm") return {VmErrorCode::VCPU_CREATE_FAILED, "BIOS requires native KVM"};
+        if (!driver.check_extension(KVM_CAP_READONLY_MEM))
+            return {VmErrorCode::VCPU_CREATE_FAILED, "BIOS requires KVM read-only memory slots"};
+        auto platform = vm->set_tss_addr(0xfffbd000); if (!platform) return platform;
+        platform = vm->set_identity_map_addr(0xfffbc000); if (!platform) return platform;
+        auto disk = read_image(options.disk_path);
+        if (disk.empty() || disk.size() % 512)
+            return {VmErrorCode::BOOT_LOAD_FAILED, "BIOS disk must contain whole 512-byte sectors (maximum 64 MiB)"};
+        auto rom = read_image(options.firmware_path.empty() ?
+            data_path("bios/archvirt-bios.bin", ARCHVIRT_PC_BIOS) : options.firmware_path);
+        if (rom.size() != 65536 || rom[0xfff0] != 0xea)
+            return {VmErrorCode::BOOT_LOAD_FAILED, "B1 BIOS ROM must be 64 KiB with its reset far jump"};
+        auto put = [&](std::size_t at, std::uint64_t value, unsigned size) {
+            for (unsigned i = 0; i < size; ++i) rom[at+i] = value >> (8*i);
+        };
+        put(0xff00, bytes, 4); put(0xff04, disk.size()/512, 4);
+        put(0xff10+2*24+8, bytes-0x100000, 8);
+        rom.back() = 0; unsigned sum = 0; for (auto b : rom) sum += b;
+        rom.back() = static_cast<std::uint8_t>(0-sum);
+        for (auto [base, size, ro] : {std::tuple<std::uint64_t,std::uint64_t,bool>{0,0xf0000,false},
+                {0xf0000,0x10000,true}, {0x100000,bytes-0x100000,false}, {0xffff0000,0x10000,true}}) {
+            auto result = memory->allocate_ram(size, base, false, ro); if (!result) return result;
+            if (ro) std::memcpy(memory->translate(base), rom.data(), rom.size());
+        }
+        auto result = memory->register_all_slots(vm->fd()); if (!result) return result;
+        pc = std::make_unique<PcDevices>(std::move(disk), serial);
+        hypervisor::VcpuConfig cfg{}; cfg.reset_real_mode = true;
+        kvm = std::make_unique<hypervisor::VcpuThread>(*vm, cfg);
+        kvm->set_exit_handler([this](struct kvm_run* run) -> VmResult {
+            if (run->exit_reason != KVM_EXIT_IO)
+                return {VmErrorCode::DEVICE_INIT_FAILED, "Unsupported BIOS MMIO/hypercall (ROM is read-only)"};
+            auto* data = reinterpret_cast<std::uint8_t*>(run) + run->io.data_offset;
+            const auto size = run->io.size;
+            if (size != 1 && size != 2 && size != 4)
+                return {VmErrorCode::DEVICE_INIT_FAILED, "Invalid BIOS I/O width"};
+            for (unsigned i = 0; i < run->io.count; ++i) {
+                std::uint32_t value = 0; std::memcpy(&value, data+i*size, size);
+                if (!pc->io(run->io.port, run->io.direction == KVM_EXIT_IO_OUT, size, value))
+                    return {VmErrorCode::DEVICE_INIT_FAILED, "Unsupported BIOS port: " + std::to_string(run->io.port)};
+                if (run->io.direction == KVM_EXIT_IO_IN) std::memcpy(data+i*size, &value, size);
+            }
+            return {};
+        });
+        return kvm->initialize();
+#else
+        return {VmErrorCode::VCPU_CREATE_FAILED, "BIOS requires native x86_64 KVM"};
+#endif
+    }
     VmResult single_step() {
         if (options.instruction_limit && count.load() >= options.instruction_limit)
             return {VmErrorCode::TIMEOUT, "Guest instruction limit reached"};
-        auto result = arm ? arm->step() : x86->step();
+        auto result = riscv ? riscv->step() : arm ? arm->step() : x86->step();
         if (result) ++count;
         return result;
     }
-    bool halted() const { return arm ? arm->halted() : x86 && x86->halted(); }
+    bool halted() const { return riscv ? riscv->halted() : arm ? arm->halted() : x86 && x86->halted(); }
     void pause_point() {
         publish_console();
         std::unique_lock lock(execution_mutex);
@@ -401,6 +467,8 @@ VmResult Runtime::write_memory(std::uint64_t address, std::span<const std::uint8
     std::lock_guard lock(impl_->execution_mutex);
     if (impl_->state.load() != Impl::State::paused) return {VmErrorCode::VIRTUAL_BACKEND_ERROR, "Pause the VM before changing memory"};
     if (data.empty() || data.size() > 65536) return {VmErrorCode::VIRTUAL_BACKEND_ERROR, "Memory size must be 1..65536"};
+    if (impl_->options.boot_mode == "bios" && ((address >= 0xf0000 && address < 0x100000) || address >= 0xffff0000))
+        return {VmErrorCode::VIRTUAL_BACKEND_ERROR, "BIOS ROM is read-only"};
     const auto bytes = impl_->memory->get_span(address, data.size());
     if (bytes.size() != data.size()) return {VmErrorCode::VIRTUAL_BACKEND_ERROR, "Memory range is outside guest RAM"};
     std::copy(data.begin(), data.end(), bytes.begin()); return {};
@@ -410,7 +478,11 @@ VmResult Runtime::registers(std::map<std::string, std::uint64_t>& values) const 
     std::lock_guard lock(impl_->execution_mutex);
     if (impl_->state.load() == Impl::State::running) return {VmErrorCode::VIRTUAL_BACKEND_ERROR, "Pause the VM before inspecting registers"};
     values.clear();
-    if (impl_->arm) {
+    if (impl_->riscv) {
+        const auto& cpu = impl_->riscv->state();
+        values["pc"] = cpu.pc; values["sp"] = cpu.x[2];
+        for (unsigned i = 0; i < cpu.x.size(); ++i) values["x" + std::to_string(i)] = cpu.x[i];
+    } else if (impl_->arm) {
         const auto& cpu = impl_->arm->state();
         values["pc"] = cpu.pc; values["sp"] = cpu.sp; values["nzcv"] = cpu.nzcv;
         for (unsigned i = 0; i < cpu.x.size(); ++i) values["x" + std::to_string(i)] = cpu.x[i];
@@ -424,7 +496,14 @@ VmResult Runtime::registers(std::map<std::string, std::uint64_t>& values) const 
         values = {{"pc", cpu.rip}, {"sp", cpu.rsp}, {"rip", cpu.rip}, {"rsp", cpu.rsp},
             {"rflags", cpu.rflags}, {"rax", cpu.rax}, {"rbx", cpu.rbx}, {"rcx", cpu.rcx}, {"rdx", cpu.rdx},
             {"rsi", cpu.rsi}, {"rdi", cpu.rdi}, {"rbp", cpu.rbp}, {"r8", cpu.r8}, {"r9", cpu.r9},
-            {"r10", cpu.r10}, {"r11", cpu.r11}, {"r12", cpu.r12}, {"r13", cpu.r13}, {"r14", cpu.r14}, {"r15", cpu.r15}};
+             {"r10", cpu.r10}, {"r11", cpu.r11}, {"r12", cpu.r12}, {"r13", cpu.r13}, {"r14", cpu.r14}, {"r15", cpu.r15}};
+#if defined(__x86_64__)
+        if (impl_->kvm) {
+            kvm_sregs s{}; auto result = impl_->kvm->get_sregs(s); if (!result) return result;
+            values["cs"] = s.cs.selector; values["cs_base"] = s.cs.base;
+            values["cr0"] = s.cr0; values["cr3"] = s.cr3; values["efer"] = s.efer;
+        }
+#endif
     }
     return {};
 }

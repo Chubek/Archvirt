@@ -118,7 +118,7 @@ int main() {
             auto result = vm->initialize(options);
             std::cout << (result ? "OK" : "FAIL") << ": " << result.message << "\n";
         } else if (cmd == "machines") {
-            for (const auto* name : {"x86_64", "aarch64"}) std::cout << name << '\n';
+            for (const auto* name : {"x86_64", "aarch64", "riscv64"}) std::cout << name << '\n';
         } else if (cmd == "vm-status") {
             if (!vm) {
                 std::cout << "No VM created\n";

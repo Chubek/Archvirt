@@ -125,7 +125,7 @@ int main(int argc, char** argv) try {
     const auto shell = manifest["default_shell"].value<std::string>();
     const auto arch = manifest["architecture"].value<std::string>();
     if (!format || *format != 1 || !shell || shell->empty() ||
-        !arch || (*arch != "x86_64" && *arch != "aarch64")) {
+        !arch || (*arch != "x86_64" && *arch != "aarch64" && *arch != "riscv64")) {
         std::cerr << "manifest must declare image_format_version=1, default_shell, and a supported architecture\n";
         return 1;
     }
@@ -141,7 +141,7 @@ int main(int argc, char** argv) try {
         std::cerr << "kernel must be a little-endian 64-bit ELF image\n";
         return 1;
     }
-    const std::uint32_t machine = *arch == "aarch64" ? 183u : 62u;
+    const std::uint32_t machine = *arch == "riscv64" ? 243u : *arch == "aarch64" ? 183u : 62u;
     if ((kernel[18] | (static_cast<unsigned>(kernel[19]) << 8)) != machine) {
         std::cerr << "kernel architecture does not match manifest\n";
         return 1;

@@ -1,9 +1,10 @@
 # Testing an OS through IPC
 
 ArchVirt exposes a versioned JSON protocol on a local Unix stream socket. It
-supports both DomIOS machine profiles (`x86_64` and `aarch64`) and custom ELF64
+supports all DomIOS machine profiles (`x86_64`, `aarch64`, and `riscv64`) and custom ELF64
 kernels using the [boot ABI](../include/archvirt_boot.h). The supported CPU and
 platform scope is described in the [README](../README.md#machine-and-execution-model).
+It also supports the native x86 [B1 PC BIOS](bios.md) disk-boot path.
 
 ## Python test fixture
 
@@ -40,7 +41,7 @@ with TestVM("build/archvirt") as vm:
             image="/path/to/initrd.img", cmdline="selftest=1", paused=True,
             max_instructions=5_000_000)
     regs = vm.registers()
-    assert regs["rdi"] == 0x10000  # boot-info pointer; X0 on AArch64
+    assert regs["rdi"] == 0x10000  # boot-info pointer; x0 on AArch64, x10 on RV64
     print(vm.read_memory(regs["pc"], 16).hex())
     vm.step(1)
     vm.resume()
@@ -56,6 +57,12 @@ must be identity mapped within `0x200000..0x600000`; RAM, devices and entry
 registers follow the selected profile. Software stepping is at guest instruction
 granularity. A paused boot stops before the first kernel instruction, after
 firmware preparation and loading.
+
+For BIOS, request `boot_mode="bios"`, `backend="kvm"`, and `disk="/path/to/disk.img"`
+instead of a direct kernel. A paused boot now stops at the reset vector, before
+firmware POST or disk reads. `firmware` optionally names a B1-layout ROM.
+Direct `kernel`, `image`, `cmdline`, instruction limits and software execution
+are rejected for BIOS. Reset reloads the host disk and discards volatile writes.
 
 `expect()` accepts bytes or UTF-8 text, consumes output through the marker, and
 retains trailing bytes for the next call. It reports timeouts, premature guest
@@ -133,7 +140,8 @@ Commands execute serially; idle connections do not block other clients.
 
 `boot` accepts `machine`, `backend`, `archml`, `kernel`, `image`, `firmware`,
 `cmdline`, `memory_mb` (40–1024), `max_instructions` (0 means unlimited),
-`domix`, `domios`, and `paused`. Unspecified fields come from CLI defaults,
+`domix`, `domios`, `paused`, `boot_mode` (`direct` or `bios`), and `disk`.
+Unspecified fields come from CLI defaults,
 not the previous boot. A boot attempt stops the old VM and clears RAM, queued
 input, output, and screen. Initialization failure leaves an empty VM with an
 error result. `reset` retains the last successful configuration even after a
@@ -150,7 +158,9 @@ These are VM results, not process exit codes from a guest OS. A successful
 The test-server process exits successfully on `quit` even after a guest failure.
 
 Register/memory reads require a paused or completed VM; writes require a paused
-VM. Addresses are guest physical RAM addresses, with bounds checking. Register
+VM. Addresses are guest physical memory addresses, with bounds checking; BIOS
+ROM is readable but rejects writes. Native x86 register maps additionally
+expose `cs`, `cs_base`, `cr0`, `cr3`, and `efer`. Register
 maps expose common `pc` and `sp` aliases, plus x86 GPRs, `rip`, `rsp`, `rflags`,
 or AArch64 `x0`–`x30`, `pc`, `sp`, `nzcv`. Screen data is 80×25 character/attribute
 pairs (4000 bytes), empty before the first snapshot. Snapshots update during
@@ -173,6 +183,9 @@ no input, so a guest cannot distinguish an injected NUL from an empty queue.
 Console capture observes guest serial bytes; firmware host diagnostics and GUI
 status text are separate. There is no guest agent or file-transfer requirement.
 
-The CTest `ipc_x86_64`, `ipc_aarch64`, and optional `ipc_native_kvm` tests exercise
+RISC-V register maps expose `x0`..`x31`, `pc`, and `sp` (alias of `x2`).
+Its backend is software only; see [the execution contract](riscv64.md).
+
+The CTest `ipc_x86_64`, `ipc_aarch64`, `ipc_riscv64`, and optional `ipc_native_kvm` tests exercise
 actual boot, shell/filesystem commands, reset, custom ELF images, binary output,
 pause/resume, inspection, interruption, and errors through this interface.

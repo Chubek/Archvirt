@@ -1,7 +1,7 @@
 # DomIOS
 
 DomIOS is the host-side firmware supervisor and boot package for ArchVirt's
-x86-64 and AArch64 machines. Its package contains architecture-neutral data;
+x86-64, AArch64, and RISC-V machines. Its package contains architecture-neutral data;
 host executables are no longer embedded as guest firmware.
 
 ## Boot flow
@@ -39,5 +39,5 @@ format is rejected; rebuild or replace overrides with the generated image.
 The guest's flat memory layout places the DIT at `0x1000`, boot information at
 `0x10000`, command line at `0x11000`, kernel at `0x200000`, initial stack top at
 `0x700000`, filesystem image at `0x800000`, and firmware at `0x2000000`.
-The console surface is at `0xb8000`; serial uses x86 port `0x3f8` or AArch64
+The console surface is at `0xb8000`; serial uses x86 port `0x3f8` or AArch64/RV64
 MMIO byte address `0x10000000`.

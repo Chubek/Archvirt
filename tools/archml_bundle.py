@@ -39,9 +39,9 @@ classes = {
     "halt": (0xFFFFFFFF, 0xD4400000),
 }
 
-def extensions():
+def extensions(forms=classes):
     result = []
-    for name, (mask, base) in classes.items():
+    for name, (mask, base) in forms.items():
         variable = [i for i in range(32) if not mask >> i & 1]
         fields = " ".join(f"(field bits {i} 1 {j})" for j, i in enumerate(variable))
         operands = f"(bits (kind immediate) (bits {len(variable)}) (signed false) (scale 1) (access read))" if fields else ""
@@ -57,12 +57,18 @@ output.parent.mkdir(parents=True, exist_ok=True)
 with output.open("w") as out:
     out.write("// Generated from ArchML ISA and machine sources.\n#pragma once\n")
     out.write("namespace domvirt::machine::sources {\n")
-    for name, isa in (("x86_64", "amd64"), ("aarch64", "arm64")):
+    for name, isa in (("x86_64", "amd64"), ("aarch64", "arm64"), ("riscv64", "riscv64")):
         text = (spec / f"{isa}.aml").read_text().rstrip()
         assert text.endswith(")")
         text = text[:-1] + (root / "machines" / f"{name}.aml").read_text()
         if name == "aarch64":
             text += extensions()
+        if name == "riscv64":
+            # The execution adapter checks funct fields precisely. Upstream
+            # metadata for other extensions does not admit them for execution.
+            text += extensions({f"rv-op-{op:02x}": (0x7f, op) for op in
+                                [0x37, 0x17, 0x6f, 0x67, 0x63, 0x03, 0x23,
+                                 0x13, 0x1b, 0x33, 0x3b, 0x0f, 0x73]})
         text += ")\n"
         (output.parent / "machines" / f"{name}.aml").write_text(text)
         out.write(f'inline constexpr char {name}[] = R"ARCHVIRT({text})ARCHVIRT";\n')

@@ -39,7 +39,7 @@ MemoryManager& MemoryManager::operator=(MemoryManager&& other) noexcept {
 }
 
 VmResult MemoryManager::allocate_ram(uint64_t size, uint64_t guest_phys_base,
-                                     bool use_hugepages) {
+                                     bool use_hugepages, bool read_only) {
     if (size == 0) {
         return {VmErrorCode::MEMORY_ALLOC_FAILED, "Memory size must be positive"};
     }
@@ -83,13 +83,13 @@ VmResult MemoryManager::allocate_ram(uint64_t size, uint64_t guest_phys_base,
     }
 
     MemorySlot slot{};
-    slot.slot_id = 0;
+    slot.slot_id = static_cast<uint32_t>(slots_.size());
     slot.guest_phys_addr = guest_phys_base;
     slot.memory_size = alloc_size;
     slot.host_userspace_addr = reinterpret_cast<uint64_t>(ptr);
     slot.mmap_base = ptr;
     slot.mmap_size = alloc_size;
-    slot.flags = 0;
+    slot.flags = read_only ? KVM_MEM_READONLY : 0;
 
     slots_.push_back(slot);
     total_ram_ += alloc_size;

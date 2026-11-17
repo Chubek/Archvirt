@@ -36,7 +36,7 @@ def words(*values):
 
 def elf(path, code):
     ident = b"\x7fELF\x02\x01\x01" + bytes(9)
-    header = struct.pack("<16sHHIQQQIHHHHHH", ident, 2, 62 if machine == "x86_64" else 183,
+    header = struct.pack("<16sHHIQQQIHHHHHH", ident, 2, {"x86_64":62,"aarch64":183,"riscv64":243}[machine],
                          1, 0x200000, 64, 0, 0, 64, 56, 1, 0, 0, 0)
     segment = struct.pack("<IIQQQQQQ", 1, 5, 4096, 0x200000, 0x200000, len(code), len(code), 4096)
     path.write_bytes((header + segment).ljust(4096, b"\0") + code)
@@ -46,6 +46,7 @@ def elf(path, code):
 with tempfile.TemporaryDirectory() as directory, TestVM(binary, "--machine", machine, "--backend", backend) as vm:
     capabilities = vm.request("query-capabilities")
     assert capabilities["managed"] and capabilities["protocol_version"] == 1
+    assert "riscv64" in capabilities["machines"]
     assert vm.status()["state"] == "empty"
     assert pathlib.Path(vm.path).stat().st_mode & 0o777 == 0o600
     rejected(vm.reset, "No successful boot")
@@ -83,7 +84,9 @@ with tempfile.TemporaryDirectory() as directory, TestVM(binary, "--machine", mac
     assert status["state"] == "paused" and status["instructions"] == 0
     assert status["backend"] == backend
     registers = vm.registers()
-    assert registers["rdi" if machine == "x86_64" else "x0"] == 0x10000
+    assert registers[{"x86_64":"rdi", "aarch64":"x0", "riscv64":"x10"}[machine]] == 0x10000
+    if machine == "riscv64":
+        assert registers["x0"] == 0 and registers["x2"] == registers["sp"] == 0x700000
     assert vm.read_memory(0x10000, 8) == b"ARVBOOT1"
     assert vm.read_memory(0x11000, 11) == b"ipc-test=1\0"
     payload = bytes(range(256)) * 256
@@ -145,6 +148,11 @@ with tempfile.TemporaryDirectory() as directory, TestVM(binary, "--machine", mac
     if machine == "x86_64":
         code = b"\x90\xb8\x2a\0\0\0\xba\xf8\x03\0\0\xee\xb0\0\xee\xb0\xff\xee\xf4"
         loop, fault = b"\xeb\xfe", b"\x0f\x0b"
+    elif machine == "riscv64":
+        # NOP; ADDI x1,zero,42; LUI x2,0x10000; SB x1,0(x2); ...; EBREAK.
+        code = words(0x00000013, 0x02a00093, 0x10000137, 0x00110023,
+                     0x00000093, 0x00110023, 0x0ff00093, 0x00110023, 0x00100073)
+        loop, fault = words(0x0000006f), words(0xffffffff)
     else:
         code = words(0xd503201f, 0xd2800541, 0xd2a20002, 0x39000041,
                      0xd2800001, 0x39000041, 0xd2801fe1, 0x39000041, 0xd4400000)
@@ -190,6 +198,10 @@ with tempfile.TemporaryDirectory() as directory, TestVM(binary, "--machine", mac
     if backend == "software":
         if machine == "x86_64":
             flood = b"\xba\xf8\x03\0\0\xb8A\0\0\0\xb9\x20\0\x10\0\xee\xff\xc9\x75\xfb\xf4"
+        elif machine == "riscv64":
+            # 0x100020 byte writes, decrement and branch back to SB.
+            flood = words(0x10000137, 0x04100093, 0x001001b7, 0x02018193,
+                          0x00110023, 0xfff18193, 0xfe019ce3, 0x00100073)
         else:
             flood = words(0xd2a20002, 0xd2800821, 0xd2800403, 0xf2a00203,
                           0x39000041, 0xf1000463, 0x54ffffc1, 0xd4400000)

@@ -7,13 +7,16 @@ Profile Profile::load(std::string_view name, const std::string& path) {
     Architecture arch;
     if (name == "x86_64" || name == "x86-64" || name == "amd64") arch = Architecture::x86_64;
     else if (name == "aarch64" || name == "arm64") arch = Architecture::aarch64;
+    else if (name == "riscv64" || name == "riscv" || name == "rv64") arch = Architecture::riscv64;
     else throw std::invalid_argument("Unsupported machine: " + std::string(name) +
-                                     "; supported machines: x86_64, aarch64");
+                                     "; supported machines: x86_64, aarch64, riscv64");
     auto doc = path.empty() ? sandstone::archml::Document::parse(
-        arch == Architecture::x86_64 ? sources::x86_64 : sources::aarch64, std::string(name))
+        arch == Architecture::x86_64 ? sources::x86_64 :
+        arch == Architecture::aarch64 ? sources::aarch64 : sources::riscv64, std::string(name))
         : sandstone::archml::Document::load(path);
     const auto* machine = doc.find("machine", "archvirt-pc");
-    const std::string expected = arch == Architecture::x86_64 ? "amd64" : "arm64";
+    const std::string expected = arch == Architecture::x86_64 ? "amd64" :
+                                 arch == Architecture::aarch64 ? "arm64" : "riscv64";
     const auto* target = doc.find("target", expected);
     auto property = [](const sandstone::archml::Node* n, std::string_view key) -> std::string {
         const auto* p = n ? n->property(key) : nullptr;
@@ -44,7 +47,11 @@ Profile Profile::load(std::string_view name, const std::string& path) {
         property(machine, "serial-kind") != (arch == Architecture::x86_64 ? "port" : "mmio") ||
         property(machine, "interrupt-controller") != (arch == Architecture::x86_64 ? "apic" : "polled"))
         throw std::invalid_argument("Unsupported DomIOS machine layout or device contract");
-    return {arch, arch == Architecture::x86_64 ? "x86_64" : "aarch64", std::move(doc),
+    if (arch == Architecture::riscv64 &&
+        (property(machine, "execution-isa") != "rv64im_zifencei" || property(machine, "halt") != "ebreak"))
+        throw std::invalid_argument("Unsupported RISC-V execution environment");
+    return {arch, arch == Architecture::x86_64 ? "x86_64" :
+                  arch == Architecture::aarch64 ? "aarch64" : "riscv64", std::move(doc),
             0x200000, 0x700000, 0x10000, 0x800000, 0x2000000, 0xb8000,
             arch == Architecture::x86_64 ? 0x3f8u : 0x10000000u, 80, 25};
 }

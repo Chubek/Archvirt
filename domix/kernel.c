@@ -235,7 +235,7 @@ static void dispatch(char* line) {
         print("shell: path too long\n"); return;
     }
     if (equal(cmd, "help")) print("help uname version cmdline pwd cd ls cat echo touch mkdir cp mv rm wc clear whoami id mount df exit poweroff\n");
-    else if (equal(cmd, "uname")) print(boot->architecture == 183 ? "Domix aarch64\n" : "Domix x86_64\n");
+    else if (equal(cmd, "uname")) print(boot->architecture == 243 ? "Domix riscv64\n" : boot->architecture == 183 ? "Domix aarch64\n" : "Domix x86_64\n");
     else if (equal(cmd, "version")) print("Domix 0.2 / DomIOS boot ABI 1\n");
     else if (equal(cmd, "cmdline")) {
         if (boot->cmdline_base <= boot->memory_size && boot->cmdline_size <= boot->memory_size - boot->cmdline_base)
@@ -285,7 +285,7 @@ void kernel_main(const struct ArchVirtBootInfo* info) {
         boot->image_base > boot->memory_size || boot->image_size > boot->memory_size - boot->image_base) return;
     for (unsigned i = 0; i < CONSOLES; ++i) { active = i; clear(); copy(consoles[i].cwd, "/"); }
     active = 0;
-    print("Domix 0.2 booting on "); print(boot->architecture == 183 ? "aarch64\n" : "x86_64\n");
+    print("Domix 0.2 booting on "); print(boot->architecture == 243 ? "riscv64\n" : boot->architecture == 183 ? "aarch64\n" : "x86_64\n");
     if (!mount_image()) { print("Domix: invalid filesystem image\n"); return; }
     if (!find("/init")) { print("Domix: missing /init\n"); return; }
     print("Root filesystem mounted; resident shell ready\n");

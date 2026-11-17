@@ -113,7 +113,7 @@ std::string TestSession::handle(const std::string& command, const std::string& r
         Json value = Json::object();
         if (command == "query-capabilities") {
             fields(args, {});
-            value = {{"protocol_version", 1}, {"machines", {"x86_64", "aarch64"}}, {"managed", managed_},
+            value = {{"protocol_version", 1}, {"machines", {"x86_64", "aarch64", "riscv64"}}, {"managed", managed_},
                 {"console_capacity", output_limit}, {"input_capacity", input_limit}, {"max_memory_bytes", 65536},
                 {"max_step_count", 10000}, {"single_step_backend", "software"},
                 {"commands", {"query-capabilities", "query-status", "boot", "reset", "pause", "resume", "step",
@@ -128,7 +128,9 @@ std::string TestSession::handle(const std::string& command, const std::string& r
                 if (!configured_valid_) throw std::invalid_argument("No successful boot to reset");
             } else {
                 fields(args, {"machine", "backend", "archml", "kernel", "image", "firmware", "cmdline",
-                              "memory_mb", "max_instructions", "domix", "domios", "paused"});
+                              "memory_mb", "max_instructions", "domix", "domios", "paused", "boot_mode", "disk"});
+                options.boot_mode = args.value("boot_mode", options.boot_mode);
+                options.disk_path = args.value("disk", options.disk_path);
                 options.machine = args.value("machine", options.machine);
                 options.backend = args.value("backend", options.backend);
                 options.archml_path = args.value("archml", options.archml_path);

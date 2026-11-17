@@ -2,7 +2,7 @@ set(DOMVIRT_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(DOMVIRT_SRC_DIR "${PROJECT_SOURCE_DIR}/src")
 set(DOMVIRT_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/../generated")
 
-foreach(MACHINE IN ITEMS x86_64 aarch64)
+foreach(MACHINE IN ITEMS x86_64 aarch64 riscv64)
     add_test(NAME boot_${MACHINE} COMMAND ${Python_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/e2e/boot_system.py" $<TARGET_FILE:domvirt_cli> ${MACHINE} software)
     set_tests_properties(boot_${MACHINE} PROPERTIES TIMEOUT 45)
@@ -11,6 +11,9 @@ foreach(MACHINE IN ITEMS x86_64 aarch64)
     set_tests_properties(ipc_${MACHINE} PROPERTIES TIMEOUT 90)
 endforeach()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    add_test(NAME bios_native_kvm COMMAND ${Python_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/e2e/bios_boot.py" $<TARGET_FILE:domvirt_cli>)
+    set_tests_properties(bios_native_kvm PROPERTIES TIMEOUT 45 SKIP_RETURN_CODE 77)
     add_test(NAME boot_native_kvm COMMAND ${Python_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/e2e/boot_system.py" $<TARGET_FILE:domvirt_cli> x86_64 kvm)
     set_tests_properties(boot_native_kvm PROPERTIES TIMEOUT 45 SKIP_RETURN_CODE 77)
@@ -48,6 +51,7 @@ set(UNIT_TEST_SOURCES
     ${DOMVIRT_TEST_DIR}/unit/test_boot_display.cpp
     ${DOMVIRT_TEST_DIR}/unit/test_virtual_cpu.cpp
     ${DOMVIRT_TEST_DIR}/unit/test_machine.cpp
+    ${DOMVIRT_TEST_DIR}/unit/test_riscv64.cpp
 )
 
 add_executable(domvirt_unit_tests ${UNIT_TEST_SOURCES})
